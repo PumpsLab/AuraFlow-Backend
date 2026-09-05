@@ -14,11 +14,13 @@ import { AuditModule } from './audit/audit.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { HistoryModule } from './history/history.module';
 import { BlockchainModule } from './blockchain/blockchain.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     DatabaseModule,
+    HealthModule,
     AuthModule,
     CompaniesModule,
     EmployeesModule,
