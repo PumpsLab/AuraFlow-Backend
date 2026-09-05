@@ -1,6 +1,6 @@
 import { Controller, Post, Req, Res, Body, HttpStatus } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { verifySignedWalletRequest } from '../common/wallet-auth.util';
 
@@ -10,6 +10,11 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('session')
+  @ApiOperation({ summary: 'Create a session for a wallet', description: 'Authenticates a wallet via signed request and returns a session token.' })
+  @ApiBody({ schema: { properties: { wallet: { type: 'string', description: 'The wallet address to create a session for' } }, required: ['wallet'] } })
+  @ApiResponse({ status: 200, description: 'Session created successfully', schema: { properties: { wallet: { type: 'string' }, sessionToken: { type: 'string' }, expiresAt: { type: 'string', format: 'date-time' } } } })
+  @ApiResponse({ status: 400, description: 'Bad request – missing wallet or invalid signature' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async createSession(@Req() request: Request, @Body() body: { wallet?: string }, @Res() response: Response) {
     try {
       const wallet = body.wallet?.trim();
