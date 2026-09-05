@@ -22,3 +22,10 @@ lerna-debug.log*
 # temp directory
 .temp
 .tmp
+
+# Build output
+coverage
+.DS_Store
+
+# Test secrets
+keypair.json

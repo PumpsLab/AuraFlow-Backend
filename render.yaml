@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: auraflow-backend
+    runtime: node
+    rootDir: auraflow-backend
+    buildCommand: npm install && npm run build
+    startCommand: node dist/main.js
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGODB_DB
+        value: auraflow
+      - key: STELLAR_NETWORK_PASSPHRASE
+        value: "Test SDF Future Network ; October 2022"
+      - key: STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: AURAFLOW_SESSION_SECRET
+        generateValue: true
+      - key: COMPANY_KEY_ENCRYPTION_SECRET
+        generateValue: true
+      - key: CONFIDENTIAL_TOKEN_CONTRACT
+        value: CAWBSB2ABV57UPX4SUTXCUNHLXEMMFSX7W57TIMRDQCAUOUC7UNUVLZ4
+      - key: AURAFLOW_PAYROLL_CONTRACT
+        value: CAFU7ZCRDNQRBZPBHB2WCU4N7G7BIKTBZBMC7PEX4RILLBPCFB4WMALI
+      - key: VERIFIER_CONTRACT
+        value: CDJ3YYBMJNGVPRO6UDIVYGZTPDA3JFI7R7A3L3AQ4S3MU36FMMGVUZI6
+      - key: AUDITOR_CONTRACT
+        value: CD6GIKGBSO4Q3S25YPXV5MSAYGNNPAXRQMWITBLSI2PLXZLBDNBI4HVA
+      - key: USDC_CONTRACT
+        value: CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
+      - key: CORS_ORIGIN
+        value: "*"
