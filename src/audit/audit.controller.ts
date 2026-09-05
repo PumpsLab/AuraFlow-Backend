@@ -1,11 +1,13 @@
 import { Controller, Get, Post, Delete, Body, Param, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiParam, ApiSecurity } from '@nestjs/swagger';
 import { AuditService } from './audit.service';
 import { UseGuards } from '@nestjs/common';
 import { WalletAuthGuard } from '../common/wallet-auth.guard';
 
 @ApiTags('Audit')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller()
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

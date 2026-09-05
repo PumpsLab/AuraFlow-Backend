@@ -1,9 +1,11 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiSecurity } from '@nestjs/swagger';
 import { ComplianceService } from './compliance.service';
 
 @ApiTags('Compliance')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller('compliance')
 export class ComplianceController {
   constructor(private readonly complianceService: ComplianceService) {}

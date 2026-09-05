@@ -1,9 +1,11 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiSecurity } from '@nestjs/swagger';
 import { PayrollService } from './payroll.service';
 
 @ApiTags('Payroll')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller('payroll')
 export class PayrollController {
   constructor(private readonly payrollService: PayrollService) {}

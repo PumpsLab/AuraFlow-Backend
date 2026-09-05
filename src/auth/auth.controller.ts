@@ -1,10 +1,12 @@
 import { Controller, Post, Req, Res, Body, HttpStatus } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiSecurity } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { verifySignedWalletRequest } from '../common/wallet-auth.util';
 
 @ApiTags('Auth')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

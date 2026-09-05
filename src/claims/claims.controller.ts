@@ -1,9 +1,11 @@
 import { Controller, Get, Post, Patch, Body, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiSecurity } from '@nestjs/swagger';
 import { ClaimsService } from './claims.service';
 
 @ApiTags('Claims')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller()
 export class ClaimsController {
   constructor(private readonly claimsService: ClaimsService) {}
