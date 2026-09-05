@@ -1,11 +1,13 @@
 import { Controller, Get, Post, Patch, Body, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiParam, ApiSecurity } from '@nestjs/swagger';
 import { StreamsService } from './streams.service';
 import { UseGuards } from '@nestjs/common';
 import { WalletAuthGuard } from '../common/wallet-auth.guard';
 
 @ApiTags('Streams')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller('streams')
 export class StreamsController {
   constructor(private readonly streamsService: StreamsService) {}

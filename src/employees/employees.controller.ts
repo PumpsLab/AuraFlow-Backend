@@ -1,11 +1,13 @@
 import { Controller, Get, Post, Patch, Body, Param, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiParam, ApiSecurity } from '@nestjs/swagger';
 import { EmployeesService } from './employees.service';
 import { UseGuards } from '@nestjs/common';
 import { WalletAuthGuard } from '../common/wallet-auth.guard';
 
 @ApiTags('Employees')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller('employees')
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}

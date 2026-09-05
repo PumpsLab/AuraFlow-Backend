@@ -1,11 +1,13 @@
 import { Controller, Get, Post, Delete, Body, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody, ApiQuery, ApiSecurity } from '@nestjs/swagger';
 import { HistoryService } from './history.service';
 import { UseGuards } from '@nestjs/common';
 import { WalletAuthGuard } from '../common/wallet-auth.guard';
 
 @ApiTags('History')
+@ApiSecurity('session')
+@ApiSecurity('signed-request')
 @Controller('history')
 export class HistoryController {
   constructor(private readonly historyService: HistoryService) {}
