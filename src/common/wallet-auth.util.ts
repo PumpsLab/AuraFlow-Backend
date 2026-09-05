@@ -1,5 +1,5 @@
 import * as nacl from 'tweetnacl';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, createHash, timingSafeEqual } from 'crypto';
 import { Keypair } from '@stellar/stellar-sdk';
 import {
   AURAFLOW_AUTH_WALLET_HEADER,
@@ -85,11 +85,16 @@ export async function verifySignedWalletRequest(input: {
   const message = await buildWalletRequestAuthMessage({ wallet, method: input.method, path: input.path, timestamp, body: input.body });
 
   try {
-    const messageBytes = new TextEncoder().encode(message);
     const signatureBytes = Uint8Array.from(Buffer.from(signature, 'base64'));
     const publicKeyBytes = Keypair.fromPublicKey(wallet).rawPublicKey();
 
-    const verified = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKeyBytes);
+    // SEP-53: Freighter's signMessage() prepends "Stellar Signed Message:\n"
+    // then SHA-256 hashes before signing. We must verify against the same payload.
+    const SEP53_PREFIX = 'Stellar Signed Message:\n';
+    const payload = SEP53_PREFIX + message;
+    const hash = createHash('sha256').update(payload).digest();
+
+    const verified = nacl.sign.detached.verify(hash, signatureBytes, publicKeyBytes);
     if (!verified) throw new Error('Invalid signature');
   } catch (err: any) {
     throw new Error('Invalid signature: ' + err.message);
