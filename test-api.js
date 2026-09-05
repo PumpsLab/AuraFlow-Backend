@@ -76,8 +76,12 @@ async function buildAuthMessage({ wallet, method, path, timestamp, body }) {
 }
 
 function signMessage(message, secretKey) {
-  const msgBytes = new TextEncoder().encode(message);
-  const sig = nacl.sign.detached(msgBytes, secretKey);
+  // SEP-53: prepend "Stellar Signed Message:\n" then SHA-256 before signing
+  // Matches Freighter's signMessage() output
+  const prefix = 'Stellar Signed Message:\n';
+  const payload = prefix + message;
+  const hash = crypto.createHash('sha256').update(payload).digest();
+  const sig = nacl.sign.detached(hash, secretKey);
   return Buffer.from(sig).toString('base64');
 }
 
