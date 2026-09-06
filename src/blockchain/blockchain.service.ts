@@ -1,17 +1,24 @@
 import { Injectable } from '@nestjs/common';
-import { rpc } from '@stellar/stellar-sdk';
+import { rpc, Horizon } from '@stellar/stellar-sdk';
 
 @Injectable()
 export class BlockchainService {
   private server: rpc.Server;
+  private horizon: Horizon.Server;
 
   constructor() {
     const rpcUrl = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
     this.server = new rpc.Server(rpcUrl);
+    const horizonUrl = process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org';
+    this.horizon = new Horizon.Server(horizonUrl);
   }
 
   getServer(): rpc.Server {
     return this.server;
+  }
+
+  getHorizon(): Horizon.Server {
+    return this.horizon;
   }
 
   getConfidentialTokenContract(): string {

@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
+import { BlockchainService } from '../blockchain/blockchain.service';
 import type { Company, CreateCompanyInput, PublicCompanyResponse, EncryptedCompanyKey } from './company-types';
-import { Keypair } from '@stellar/stellar-sdk';
+import { Keypair, TransactionBuilder, Operation, Asset } from '@stellar/stellar-sdk';
 import { z } from 'zod';
 
 const createCompanySchema = z.object({
@@ -47,7 +48,10 @@ function toPublicCompany(company: Company): PublicCompanyResponse {
 
 @Injectable()
 export class CompaniesService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly blockchain: BlockchainService,
+  ) {}
 
   private companies() { return this.db.collection('companies'); }
   private keys() { return this.db.collection('company_keys'); }
@@ -106,10 +110,87 @@ export class CompaniesService {
     return decryptSecretKey(record);
   }
 
-  async getTreasuryBalance(companyId: string): Promise<string> {
+  private getUsdcAsset(): Asset {
+    const issuer = process.env.USDC_ISSUER || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+    return new Asset('USDC', issuer);
+  }
+
+  async getTreasuryXlmBalance(companyId: string): Promise<string> {
     const company = await this.findById(companyId);
     if (!company) throw new Error('Company not found');
-    await this.loadPrivateKey(companyId, 'treasury');
-    return '0';
+    const horizon = this.blockchain.getHorizon();
+    try {
+      const account = await horizon.loadAccount(company.treasuryPubkey);
+      const nativeBalance = account.balances.find((b: any) => b.asset_type === 'native');
+      return nativeBalance ? nativeBalance.balance : '0';
+    } catch {
+      return '0';
+    }
+  }
+
+  async getTreasuryUsdcBalance(companyId: string): Promise<string> {
+    const company = await this.findById(companyId);
+    if (!company) throw new Error('Company not found');
+    const horizon = this.blockchain.getHorizon();
+    try {
+      const account = await horizon.loadAccount(company.treasuryPubkey);
+      const usdc = this.getUsdcAsset();
+      const usdcBalance = account.balances.find(
+        (b: any) => b.asset_type === 'credit_alphanum4' && b.asset_code === usdc.code && b.asset_issuer === usdc.issuer,
+      );
+      return usdcBalance ? usdcBalance.balance : '0';
+    } catch {
+      return '0';
+    }
+  }
+
+  async hasUsdcTrustline(companyId: string): Promise<boolean> {
+    const company = await this.findById(companyId);
+    if (!company) throw new Error('Company not found');
+    const horizon = this.blockchain.getHorizon();
+    try {
+      const account = await horizon.loadAccount(company.treasuryPubkey);
+      const usdc = this.getUsdcAsset();
+      return account.balances.some(
+        (b: any) => b.asset_type === 'credit_alphanum4' && b.asset_code === usdc.code && b.asset_issuer === usdc.issuer,
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async getTreasuryBalance(companyId: string): Promise<{ xlm: string; usdc: string; hasTrustline: boolean }> {
+    const company = await this.findById(companyId);
+    if (!company) throw new Error('Company not found');
+    const [xlm, usdc, hasTrustline] = await Promise.all([
+      this.getTreasuryXlmBalance(companyId),
+      this.getTreasuryUsdcBalance(companyId),
+      this.hasUsdcTrustline(companyId),
+    ]);
+    return { xlm, usdc, hasTrustline };
+  }
+
+  async setupTrustline(companyId: string, wallet: string): Promise<{ txHash: string }> {
+    const company = await this.findById(companyId);
+    if (!company) throw new Error('Company not found');
+    if (company.employerWallet !== wallet) throw new Error('Unauthorized');
+
+    const secret = await this.loadPrivateKey(companyId, 'treasury');
+    const keypair = Keypair.fromSecret(secret);
+    const server = this.blockchain.getServer();
+    const horizon = this.blockchain.getHorizon();
+    const networkPassphrase = this.blockchain.getNetworkPassphrase();
+
+    const account = await horizon.loadAccount(keypair.publicKey());
+    const usdc = this.getUsdcAsset();
+
+    const tx = new TransactionBuilder(account, { fee: '100000', networkPassphrase })
+      .addOperation(Operation.changeTrust({ asset: usdc }))
+      .setTimeout(300)
+      .build();
+
+    tx.sign(keypair);
+    const result = await server.sendTransaction(tx);
+    return { txHash: result.hash };
   }
 }
