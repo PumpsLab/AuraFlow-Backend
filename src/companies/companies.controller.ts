@@ -50,10 +50,10 @@ export class CompaniesController {
 
   @Get(':companyId/balance')
   @UseGuards(WalletAuthGuard)
-  @ApiOperation({ summary: 'Get company treasury balance', description: 'Returns the balance of the company treasury wallet.' })
+  @ApiOperation({ summary: 'Get company treasury balance', description: 'Returns XLM, USDC balances and trustline status of the company treasury wallet.' })
   @ApiParam({ name: 'companyId', description: 'Company ID' })
   @ApiQuery({ name: 'wallet', required: true, description: 'Employer wallet address for authorization' })
-  @ApiResponse({ status: 200, description: 'Balance retrieved', schema: { properties: { ok: { type: 'boolean', example: true }, balance: { type: 'string' }, location: { type: 'string', example: 'ephemeral' } } } })
+  @ApiResponse({ status: 200, description: 'Balance retrieved', schema: { properties: { ok: { type: 'boolean', example: true }, balance: { type: 'object', properties: { xlm: { type: 'string', example: '10.0000000' }, usdc: { type: 'string', example: '5000.0000000' }, hasTrustline: { type: 'boolean', example: true } } } } } })
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Company not found' })
@@ -63,7 +63,7 @@ export class CompaniesController {
       if (!company) return response.status(404).json({ ok: false, error: 'Company not found' });
       if (company.employerWallet !== wallet) return response.status(403).json({ ok: false, error: 'Unauthorized' });
       const balance = await this.companiesService.getTreasuryBalance(companyId);
-      return response.json({ ok: true, balance, location: 'ephemeral' });
+      return response.json({ ok: true, balance });
     } catch (error: any) {
       return response.status(500).json({ ok: false, error: error.message });
     }
@@ -113,12 +113,33 @@ export class CompaniesController {
     }
   }
 
-  @Get(':companyId/funding-instructions')
+  @Post(':companyId/setup-trustline')
   @UseGuards(WalletAuthGuard)
-  @ApiOperation({ summary: 'Get funding instructions', description: 'Returns instructions for funding the company payroll treasury.' })
+  @ApiOperation({ summary: 'Setup USDC trustline for treasury', description: 'Adds a USDC trustline to the treasury account. Treasury must have XLM for base reserve first.' })
   @ApiParam({ name: 'companyId', description: 'Company ID' })
   @ApiQuery({ name: 'wallet', required: true, description: 'Employer wallet address for authorization' })
-  @ApiResponse({ status: 200, description: 'Funding instructions retrieved', schema: { properties: { ok: { type: 'boolean', example: true }, instructions: { type: 'object', properties: { title: { type: 'string' }, currency: { type: 'string' }, treasuryPubkey: { type: 'string' }, steps: { type: 'array', items: { type: 'string' } } } } } } })
+  @ApiResponse({ status: 200, description: 'Trustline created', schema: { properties: { ok: { type: 'boolean', example: true }, txHash: { type: 'string' } } } })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Company not found' })
+  async setupTrustline(@Param('companyId') companyId: string, @Query('wallet') wallet: string, @Res() response: Response) {
+    try {
+      const company = await this.companiesService.findById(companyId);
+      if (!company) return response.status(404).json({ ok: false, error: 'Company not found' });
+      if (company.employerWallet !== wallet) return response.status(403).json({ ok: false, error: 'Unauthorized' });
+      const result = await this.companiesService.setupTrustline(companyId, wallet);
+      return response.json({ ok: true, ...result });
+    } catch (error: any) {
+      return response.status(400).json({ ok: false, error: error.message });
+    }
+  }
+
+  @Get(':companyId/funding-instructions')
+  @UseGuards(WalletAuthGuard)
+  @ApiOperation({ summary: 'Get funding instructions', description: 'Returns dynamic funding status with step-by-step instructions for treasury setup.' })
+  @ApiParam({ name: 'companyId', description: 'Company ID' })
+  @ApiQuery({ name: 'wallet', required: true, description: 'Employer wallet address for authorization' })
+  @ApiResponse({ status: 200, description: 'Funding instructions retrieved' })
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   @ApiResponse({ status: 404, description: 'Company not found' })
@@ -127,7 +148,47 @@ export class CompaniesController {
       const company = await this.companiesService.findById(companyId);
       if (!company) return response.status(404).json({ ok: false, error: 'Company not found' });
       if (company.employerWallet !== wallet) return response.status(403).json({ ok: false, error: 'Unauthorized' });
-      return response.json({ ok: true, instructions: { title: 'Fund company payroll treasury', currency: company.currency, treasuryPubkey: company.treasuryPubkey, steps: ['Send USDC to the treasury address.', 'After funding, use payroll to settle claims.', 'Only fund payroll budget.'] } });
+
+      const balance = await this.companiesService.getTreasuryBalance(companyId);
+      const hasXlm = parseFloat(balance.xlm) >= 2;
+      const hasTrustline = balance.hasTrustline;
+      const hasUsdc = parseFloat(balance.usdc) > 0;
+
+      const steps = [
+        {
+          step: 1,
+          label: 'Fund XLM for base reserve',
+          description: `Send at least 2 XLM to treasury address ${company.treasuryPubkey}`,
+          status: hasXlm ? 'completed' : 'pending',
+          treasuryPubkey: company.treasuryPubkey,
+          xlmBalance: balance.xlm,
+        },
+        {
+          step: 2,
+          label: 'Setup USDC trustline',
+          description: 'Backend will add USDC trustline to treasury account',
+          status: !hasXlm ? 'blocked' : hasTrustline ? 'completed' : 'ready',
+          requiresXlm: true,
+        },
+        {
+          step: 3,
+          label: 'Fund USDC for payroll',
+          description: `Send USDC to treasury address ${company.treasuryPubkey}`,
+          status: !hasTrustline ? 'blocked' : hasUsdc ? 'completed' : 'ready',
+          treasuryPubkey: company.treasuryPubkey,
+          usdcBalance: balance.usdc,
+        },
+      ];
+
+      const isReady = hasXlm && hasTrustline && hasUsdc;
+
+      return response.json({
+        ok: true,
+        treasuryPubkey: company.treasuryPubkey,
+        currency: company.currency,
+        isReady,
+        steps,
+      });
     } catch (error: any) {
       return response.status(500).json({ ok: false, error: error.message });
     }
