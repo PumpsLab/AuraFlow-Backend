@@ -106,10 +106,10 @@ export class CompaniesController {
       const company = await this.companiesService.findById(companyId);
       if (!company) return response.status(404).json({ ok: false, error: 'Company not found' });
       if (company.employerWallet !== wallet) return response.status(403).json({ ok: false, error: 'Unauthorized' });
-      await this.companiesService.loadPrivateKey(companyId, 'treasury');
-      return response.json({ ok: true, txHash: 'mock_stellar_tx_hash_pending_real_implementation', amount: body.amount });
+      const result = await this.companiesService.withdrawFromTreasury(companyId, body.amount, body.destinationAddress);
+      return response.json({ ok: true, txHash: result.txHash, amount: body.amount });
     } catch (error: any) {
-      return response.status(500).json({ ok: false, error: error.message });
+      return response.status(400).json({ ok: false, error: error.message });
     }
   }
 
