@@ -42,6 +42,6 @@ export class BlockchainService {
   }
 
   getNetworkPassphrase(): string {
-    return process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Future Network ; October 2022';
+    return process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
   }
 }

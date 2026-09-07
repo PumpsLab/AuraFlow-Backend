@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
-import { TransactionBuilder, Address, Contract, nativeToScVal } from '@stellar/stellar-sdk';
+import { TransactionBuilder, Address, Contract, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 
 @Injectable()
 export class PrivatePayrollService {
@@ -23,22 +23,35 @@ export class PrivatePayrollService {
 
     const account = await server.getAccount(input.employerWallet);
 
-    const recipientAddrs = input.recipients.map(r => new Address(r.address).toScVal());
-    const amounts = input.recipients.map(r => nativeToScVal(Math.round(r.amount * 1_000_000), { type: 'i128' }));
+    const recipientAddrsScVals = input.recipients.map(r => new Address(r.address).toScVal());
+    const amountsScVals = input.recipients.map(r => nativeToScVal(Math.round(r.amount * 1_000_000), { type: 'i128' }));
 
     const contractInstance = new Contract(payrollContract);
+
+    const sorobanData = new xdr.SorobanTransactionData({
+      resources: new xdr.SorobanResources({
+        footprint: new xdr.LedgerFootprint({ readOnly: [], readWrite: [] }),
+        instructions: 1000000,
+        diskReadBytes: 200000,
+        writeBytes: 100000,
+      }),
+      resourceFee: xdr.Int64(10000000),
+      ext: xdr.ExtensionPoint.v0(),
+    });
+
     const transaction = new TransactionBuilder(account, {
-      fee: '100000',
+      fee: '500000',
       networkPassphrase: this.blockchain.getNetworkPassphrase(),
     })
       .addOperation(
         contractInstance.call(
           'process_payroll_batch',
           new Address(input.employerWallet).toScVal(),
-          nativeToScVal(recipientAddrs),
-          nativeToScVal(amounts),
+          xdr.ScVal.scvVec(recipientAddrsScVals),
+          xdr.ScVal.scvVec(amountsScVals),
         ),
       )
+      .setSorobanData(sorobanData)
       .setTimeout(300)
       .build();
 
@@ -61,15 +74,34 @@ export class PrivatePayrollService {
   }
 
   async submitTransaction(signedXdr: string) {
-    const server = this.blockchain.getServer();
-    const transaction = TransactionBuilder.fromXDR(
-      signedXdr,
-      this.blockchain.getNetworkPassphrase(),
-    );
-    const result = await server.sendTransaction(transaction);
+    const rpcUrl = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
+
+    const res = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'sendTransaction',
+        params: { tx: signedXdr },
+      }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      throw new Error(`Soroban submit failed: ${JSON.stringify(data.error).slice(0, 500)}`);
+    }
+
+    const result = data.result;
+    if (result?.status === 'ERROR') {
+      const diagnostic = result.diagnosticEvents ? JSON.stringify(result.diagnosticEvents).slice(0, 2000) : '';
+      const errorResult = result.errorResult ? JSON.stringify(result.errorResult).slice(0, 2000) : '';
+      throw new Error(`Soroban submit failed: ${result.status} ${errorResult} ${diagnostic}`.trim());
+    }
+
     return {
-      txHash: result.hash,
-      status: result.status,
+      txHash: result?.hash || '',
+      status: result?.status || 'PENDING',
     };
   }
 }

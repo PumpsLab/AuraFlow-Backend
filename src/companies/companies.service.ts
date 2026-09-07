@@ -177,7 +177,6 @@ export class CompaniesService {
 
     const secret = await this.loadPrivateKey(companyId, 'treasury');
     const keypair = Keypair.fromSecret(secret);
-    const server = this.blockchain.getServer();
     const horizon = this.blockchain.getHorizon();
     const networkPassphrase = this.blockchain.getNetworkPassphrase();
 
@@ -190,7 +189,27 @@ export class CompaniesService {
       .build();
 
     tx.sign(keypair);
-    const result = await server.sendTransaction(tx);
-    return { txHash: result.hash };
+    const result: any = await (horizon as any).submitTransaction(tx);
+    return { txHash: result.hash || result.txHash };
+  }
+
+  async withdrawFromTreasury(companyId: string, amount: number, destination: string): Promise<{ txHash: string }> {
+    const company = await this.findById(companyId);
+    if (!company) throw new Error('Company not found');
+    const secret = await this.loadPrivateKey(companyId, 'treasury');
+    const keypair = Keypair.fromSecret(secret);
+    const horizon = this.blockchain.getHorizon();
+    const networkPassphrase = this.blockchain.getNetworkPassphrase();
+    const usdc = this.getUsdcAsset();
+
+    // Ensure destination has trustline — Horizon will throw op_no_trust if not
+    const account = await horizon.loadAccount(keypair.publicKey());
+    const tx = new TransactionBuilder(account, { fee: '100000', networkPassphrase })
+      .addOperation(Operation.payment({ destination, asset: usdc, amount: amount.toFixed(7) }))
+      .setTimeout(300)
+      .build();
+    tx.sign(keypair);
+    const result: any = await (horizon as any).submitTransaction(tx);
+    return { txHash: result.hash || result.txHash };
   }
 }
