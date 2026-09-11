@@ -28,18 +28,7 @@ export class PrivatePayrollService {
 
     const contractInstance = new Contract(payrollContract);
 
-    const sorobanData = new xdr.SorobanTransactionData({
-      resources: new xdr.SorobanResources({
-        footprint: new xdr.LedgerFootprint({ readOnly: [], readWrite: [] }),
-        instructions: 1000000,
-        diskReadBytes: 200000,
-        writeBytes: 100000,
-      }),
-      resourceFee: xdr.Int64(10000000),
-      ext: xdr.ExtensionPoint.v0(),
-    });
-
-    const transaction = new TransactionBuilder(account, {
+    const unsignedTx = new TransactionBuilder(account, {
       fee: '500000',
       networkPassphrase: this.blockchain.getNetworkPassphrase(),
     })
@@ -51,9 +40,22 @@ export class PrivatePayrollService {
           xdr.ScVal.scvVec(amountsScVals),
         ),
       )
-      .setSorobanData(sorobanData)
       .setTimeout(300)
       .build();
+
+    let transaction;
+    let simulationWarning: string | undefined;
+    try {
+      transaction = await server.prepareTransaction(unsignedTx);
+    } catch (err: any) {
+      const msg = err?.message || String(err);
+      if (msg.includes('HostError') || msg.includes('Contract')) {
+        simulationWarning = `Simulation failed (vault may lack USDC): ${msg.slice(0, 200)}`;
+        transaction = unsignedTx;
+      } else {
+        throw err;
+      }
+    }
 
     const totalAmountMicro = input.recipients.reduce(
       (sum, r) => sum + Math.round(r.amount * 1_000_000), 0,
@@ -63,6 +65,7 @@ export class PrivatePayrollService {
       xdr: transaction.toXDR(),
       networkPassphrase: this.blockchain.getNetworkPassphrase(),
       totalAmountMicro,
+      simulationWarning,
       recipients: input.recipients.map(r => ({
         address: r.address,
         name: r.name,
@@ -83,7 +86,7 @@ export class PrivatePayrollService {
         jsonrpc: '2.0',
         id: 1,
         method: 'sendTransaction',
-        params: { tx: signedXdr },
+        params: { transaction: signedXdr },
       }),
     });
     const data = await res.json();
