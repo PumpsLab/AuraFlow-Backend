@@ -3,7 +3,7 @@ import * as crypto from 'node:crypto';
 import { DatabaseService } from '../database/database.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
 import type { Company, CreateCompanyInput, PublicCompanyResponse, EncryptedCompanyKey } from './company-types';
-import { Keypair, TransactionBuilder, Operation, Asset } from '@stellar/stellar-sdk';
+import { Keypair, TransactionBuilder, Address, Contract, nativeToScVal, Operation, Asset } from '@stellar/stellar-sdk';
 import { z } from 'zod';
 
 const createCompanySchema = z.object({
@@ -170,6 +170,14 @@ export class CompaniesService {
     return { xlm, usdc, hasTrustline };
   }
 
+  async getPrivateBalance(employeeAddress: string): Promise<number> {
+    return this.blockchain.getPrivateBalance(employeeAddress);
+  }
+
+  async getVaultUsdcBalance(): Promise<number> {
+    return this.blockchain.getVaultUsdcBalance();
+  }
+
   async setupTrustline(companyId: string, wallet: string): Promise<{ txHash: string }> {
     const company = await this.findById(companyId);
     if (!company) throw new Error('Company not found');
@@ -211,5 +219,39 @@ export class CompaniesService {
     tx.sign(keypair);
     const result: any = await (horizon as any).submitTransaction(tx);
     return { txHash: result.hash || result.txHash };
+  }
+
+  async buildFundTreasury(companyId: string, employer: string, amountMicro: number): Promise<{ xdr: string; networkPassphrase: string }> {
+    const company = await this.findById(companyId);
+    if (!company) throw new Error('Company not found');
+    if (company.employerWallet !== employer) throw new Error('Unauthorized');
+
+    const server = this.blockchain.getServer();
+    const payrollContract = this.blockchain.getPayrollContract();
+    const networkPassphrase = this.blockchain.getNetworkPassphrase();
+
+    const account = await server.getAccount(employer);
+    const contract = new Contract(payrollContract);
+
+    const unsignedTx = new TransactionBuilder(account, {
+      fee: '500000',
+      networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          'fund_treasury',
+          new Address(employer).toScVal(),
+          nativeToScVal(amountMicro, { type: 'i128' }),
+        ),
+      )
+      .setTimeout(300)
+      .build();
+
+    const transaction = await server.prepareTransaction(unsignedTx);
+
+    return {
+      xdr: transaction.toXDR(),
+      networkPassphrase,
+    };
   }
 }

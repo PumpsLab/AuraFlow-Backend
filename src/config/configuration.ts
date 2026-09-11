@@ -13,7 +13,7 @@ export default () => ({
   },
   blockchain: {
     stellarRpcUrl: process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org',
-    stellarNetworkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Future Network ; October 2022',
+    stellarNetworkPassphrase: process.env.STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015',
     confidentialTokenContract: process.env.CONFIDENTIAL_TOKEN_CONTRACT || '',
     payrollContract: process.env.AURAFLOW_PAYROLL_CONTRACT || '',
     verifierContract: process.env.VERIFIER_CONTRACT || '',

@@ -26,6 +26,5 @@ lerna-debug.log*
 # Build output
 coverage
 .DS_Store
-
 # Test secrets
 keypair.json
