@@ -22,11 +22,15 @@ export class BlockchainService {
   }
 
   getConfidentialTokenContract(): string {
-    return process.env.CONFIDENTIAL_TOKEN_CONTRACT || '';
+    const addr = process.env.CONFIDENTIAL_TOKEN_CONTRACT || '';
+    if (!addr) throw new Error('CONFIDENTIAL_TOKEN_CONTRACT is not set in environment');
+    return addr;
   }
 
   getPayrollContract(): string {
-    return process.env.AURAFLOW_PAYROLL_CONTRACT || '';
+    const addr = process.env.AURAFLOW_PAYROLL_CONTRACT || '';
+    if (!addr) throw new Error('AURAFLOW_PAYROLL_CONTRACT is not set in environment');
+    return addr;
   }
 
   getVerifierContract(): string {
