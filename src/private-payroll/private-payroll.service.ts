@@ -43,19 +43,7 @@ export class PrivatePayrollService {
       .setTimeout(300)
       .build();
 
-    let transaction;
-    let simulationWarning: string | undefined;
-    try {
-      transaction = await server.prepareTransaction(unsignedTx);
-    } catch (err: any) {
-      const msg = err?.message || String(err);
-      if (msg.includes('HostError') || msg.includes('Contract')) {
-        simulationWarning = `Simulation failed (vault may lack USDC): ${msg.slice(0, 200)}`;
-        transaction = unsignedTx;
-      } else {
-        throw err;
-      }
-    }
+    const transaction = await server.prepareTransaction(unsignedTx);
 
     const totalAmountMicro = input.recipients.reduce(
       (sum, r) => sum + Math.round(r.amount * 1_000_000), 0,
@@ -65,7 +53,6 @@ export class PrivatePayrollService {
       xdr: transaction.toXDR(),
       networkPassphrase: this.blockchain.getNetworkPassphrase(),
       totalAmountMicro,
-      simulationWarning,
       recipients: input.recipients.map(r => ({
         address: r.address,
         name: r.name,
