@@ -15,8 +15,9 @@ const http = require('http');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+require('dotenv').config();
 const nacl = require('tweetnacl');
-const { Keypair } = require('@stellar/stellar-sdk');
+const { Keypair, TransactionBuilder, Operation, Asset } = require('@stellar/stellar-sdk');
 
 const BASE = 'http://localhost:4000';
 const AUTH_VERSION = '1';
@@ -310,6 +311,201 @@ async function main() {
     sessionGet(keypair, `/api/v1/history?employerWallet=${keypair.publicKey}`, sessionToken)
   );
   console.log();
+
+  // ── Step 11: Funding Instructions ──────────────────────────────
+  let treasuryPubkey;
+  if (companyId) {
+    console.log('11. Funding Instructions');
+    const fundingRes = await log('GET /companies/:id/funding-instructions', () =>
+      sessionGet(keypair, `/api/v1/companies/${companyId}/funding-instructions?wallet=${keypair.publicKey}`, sessionToken)
+    );
+    treasuryPubkey = fundingRes.body?.treasuryPubkey;
+    console.log(`  Treasury pubkey: ${treasuryPubkey || 'N/A'}`);
+    console.log(`  Is ready: ${fundingRes.body?.isReady}`);
+    console.log(`  Steps: ${fundingRes.body?.steps?.map(s => `${s.step}:${s.status}`).join(', ')}`);
+    console.log();
+  }
+
+  // ── Step 12: Fund XLM to Treasury via Friendbot ────────────────
+  if (treasuryPubkey) {
+    console.log('12. Fund XLM to Treasury');
+    try {
+      const fbRes = await fetch(`https://friendbot.stellar.org/?addr=${treasuryPubkey}`);
+      const fbData = await fbRes.json();
+      if (fbData.successful) {
+        console.log(`  ✓ Friendbot funded ${treasuryPubkey.slice(0, 12)}...`);
+      } else {
+        console.log(`  ✗ Friendbot error: ${JSON.stringify(fbData).slice(0, 120)}`);
+      }
+    } catch (err) {
+      console.log(`  ✗ Friendbot request failed: ${err.message}`);
+    }
+    // Wait for ledger
+    await new Promise(r => setTimeout(r, 3000));
+    console.log();
+
+    // ── Step 13: Verify Balance After XLM Funding ──────────────
+    console.log('13. Balance After XLM Funding');
+    const balanceAfterXlm = await log('GET /companies/:id/balance', () =>
+      sessionGet(keypair, `/api/v1/companies/${companyId}/balance?wallet=${keypair.publicKey}`, sessionToken)
+    );
+    console.log(`  XLM: ${balanceAfterXlm.body?.balance?.xlm}`);
+    console.log();
+
+    // ── Step 14: Setup Trustline ───────────────────────────────
+    console.log('14. Setup USDC Trustline');
+    const trustlineRes = await log('POST /companies/:id/setup-trustline', () =>
+      sessionPost(keypair, `/api/v1/companies/${companyId}/setup-trustline?wallet=${keypair.publicKey}`, {}, sessionToken)
+    );
+    console.log(`  Tx hash: ${trustlineRes.body?.txHash || 'N/A'}`);
+    // Wait for ledger
+    await new Promise(r => setTimeout(r, 3000));
+    console.log();
+
+    // ── Step 14.5: Fund Employer Wallet via Friendbot ──────────
+    console.log('14.5. Fund Employer Wallet');
+    try {
+      const fbEmpRes = await fetch(`https://friendbot.stellar.org/?addr=${keypair.publicKey}`);
+      const fbEmpData = await fbEmpRes.json();
+      if (fbEmpData.successful) {
+        console.log(`  ✓ Friendbot funded employer ${keypair.publicKey.slice(0, 12)}...`);
+      } else {
+        console.log(`  ✗ Friendbot error: ${JSON.stringify(fbEmpData).slice(0, 120)}`);
+      }
+    } catch (err) {
+      console.log(`  ✗ Friendbot request failed: ${err.message}`);
+    }
+    await new Promise(r => setTimeout(r, 3000));
+    console.log();
+
+    // ── Step 14.6: Generate + Fund Employee Wallet ─────────────
+    console.log('14.6. Generate + Fund Employee Wallet');
+    const employeeKp = Keypair.random();
+    console.log(`  Employee wallet: ${employeeKp.publicKey()}`);
+    try {
+      const fbEmp2Res = await fetch(`https://friendbot.stellar.org/?addr=${employeeKp.publicKey()}`);
+      const fbEmp2Data = await fbEmp2Res.json();
+      if (fbEmp2Data.successful) {
+        console.log(`  ✓ Friendbot funded employee ${employeeKp.publicKey().slice(0, 12)}...`);
+      } else {
+        console.log(`  ✗ Friendbot error: ${JSON.stringify(fbEmp2Data).slice(0, 120)}`);
+      }
+    } catch (err) {
+      console.log(`  ✗ Friendbot request failed: ${err.message}`);
+    }
+    await new Promise(r => setTimeout(r, 3000));
+    console.log();
+
+    // ── Step 14.7: Employee USDC Trustline ─────────────────────
+    console.log('14.7. Employee USDC Trustline');
+    try {
+      const { Horizon: HorizonSdk } = require('@stellar/stellar-sdk');
+      const empHorizon = new HorizonSdk.Server('https://horizon-testnet.stellar.org');
+      const empAccount = await empHorizon.loadAccount(employeeKp.publicKey());
+      const usdcIssuer = process.env.USDC_ISSUER || 'GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5';
+      const empUsdcAsset = new Asset('USDC', usdcIssuer);
+
+      const empTrustTx = new TransactionBuilder(empAccount, {
+        fee: '100000',
+        networkPassphrase: 'Test SDF Network ; September 2015',
+      })
+        .addOperation(Operation.changeTrust({ asset: empUsdcAsset }))
+        .setTimeout(300)
+        .build();
+      empTrustTx.sign(employeeKp);
+
+      const empTrustResult = await empHorizon.submitTransaction(empTrustTx);
+      console.log(`  ✓ Employee trustline set. Hash: ${empTrustResult.hash?.slice(0, 16)}...`);
+    } catch (err) {
+      console.log(`  ✗ Employee trustline failed: ${err.message?.slice(0, 200)}`);
+    }
+    await new Promise(r => setTimeout(r, 3000));
+    console.log();
+
+    // ── Step 15: Build Fund Treasury Transaction ──────────────
+    console.log('15. Build Fund Treasury Transaction');
+    const buildRes = await log('POST /companies/:id/fund-treasury (build)', () =>
+      sessionPost(keypair, `/api/v1/companies/${companyId}/fund-treasury?wallet=${keypair.publicKey}`, { amount: 1.0 }, sessionToken)
+    );
+    const unsignedXdr = buildRes.body?.xdr;
+    const netPassphrase = buildRes.body?.networkPassphrase;
+    console.log(`  XDR length: ${unsignedXdr?.length || 0}`);
+    console.log(`  Network: ${netPassphrase}`);
+    console.log();
+
+    // ── Step 16: Sign & Submit Fund Treasury ──────────────────
+    if (unsignedXdr && netPassphrase) {
+      console.log('16. Sign & Submit Fund Treasury');
+      try {
+        const tx = TransactionBuilder.fromXDR(unsignedXdr, netPassphrase);
+        tx.sign(Keypair.fromSecret(keypair.secretKey));
+        const signedXdr = tx.toXDR();
+
+        const submitRes = await sessionPost(keypair, `/api/v1/companies/${companyId}/fund-treasury/submit?wallet=${keypair.publicKey}`, { signedXdr }, sessionToken);
+        if (submitRes.body?.ok) {
+          console.log(`  ✓ Submitted! Hash: ${submitRes.body.txHash?.slice(0, 16)}...`);
+        } else {
+          console.log(`  ✗ Submit failed: ${JSON.stringify(submitRes.body).slice(0, 120)}`);
+        }
+      } catch (err) {
+        console.log(`  ✗ Sign/submit error: ${err.message}`);
+      }
+      // Wait for ledger
+      await new Promise(r => setTimeout(r, 3000));
+      console.log();
+
+      // ── Step 17: Final Balance Check ────────────────────────
+      console.log('17. Final Balance Check');
+      const finalBalance = await log('GET /companies/:id/balance', () =>
+        sessionGet(keypair, `/api/v1/companies/${companyId}/balance?wallet=${keypair.publicKey}`, sessionToken)
+      );
+      console.log(`  XLM: ${finalBalance.body?.balance?.xlm}`);
+      console.log(`  USDC: ${finalBalance.body?.balance?.usdc}`);
+      console.log(`  Has trustline: ${finalBalance.body?.balance?.hasTrustline}`);
+      console.log();
+
+        // ── Step 18: Build Process Payroll Batch ──────────────
+        const payrollContract = process.env.AURAFLOW_PAYROLL_CONTRACT || '';
+        if (payrollContract) {
+          console.log('18. Build Process Payroll Batch');
+          const recipientWallet = employeeKp.publicKey();
+          const payrollBuildRes = await log('POST /private-payroll/build-transaction', () =>
+            authPost(keypair, `/api/v1/private-payroll/build-transaction?wallet=${keypair.publicKey}`, {
+              employerWallet: keypair.publicKey,
+              payPeriod: '2026-09',
+              recipients: [
+                { employeeId: 'test-employee', name: 'Test Employee', address: recipientWallet, amount: 0.1 },
+              ],
+            })
+          );
+          const payrollXdr = payrollBuildRes.body?.xdr;
+          const simWarning = payrollBuildRes.body?.simulationWarning;
+          console.log(`  XDR length: ${payrollXdr?.length || 0}`);
+          if (simWarning) console.log(`  ⚠ Simulation warning: ${simWarning.slice(0, 120)}`);
+          console.log();
+
+          // ── Step 19: Sign & Submit Payroll Batch ────────────
+          if (payrollXdr) {
+            console.log('19. Sign & Submit Payroll Batch');
+            try {
+              const payrollTx = TransactionBuilder.fromXDR(payrollXdr, payrollBuildRes.body?.networkPassphrase || 'Test SDF Network ; September 2015');
+              payrollTx.sign(Keypair.fromSecret(keypair.secretKey));
+              const signedPayrollXdr = payrollTx.toXDR();
+
+              const submitPayrollRes = await authPost(keypair, `/api/v1/private-payroll/submit?wallet=${keypair.publicKey}`, { signedXdr: signedPayrollXdr });
+              if (submitPayrollRes.body?.ok) {
+                console.log(`  ✓ Payroll submitted! Hash: ${submitPayrollRes.body.txHash?.slice(0, 16)}...`);
+              } else {
+                console.log(`  ✗ Submit failed: ${JSON.stringify(submitPayrollRes.body).slice(0, 200)}`);
+              }
+            } catch (err) {
+              console.log(`  ✗ Sign/submit error: ${err.message?.slice(0, 200)}`);
+            }
+            console.log();
+          }
+        }
+    }
+  }
 
   console.log('All tests passed!');
 }

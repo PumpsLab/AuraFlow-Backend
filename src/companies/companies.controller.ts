@@ -193,4 +193,67 @@ export class CompaniesController {
       return response.status(500).json({ ok: false, error: error.message });
     }
   }
+
+  @Post(':companyId/fund-treasury')
+  @UseGuards(WalletAuthGuard)
+  @ApiOperation({ summary: 'Build fund-treasury transaction', description: 'Builds an unsigned Soroban transaction to fund the on-chain treasury. The employer must sign with Freighter and submit via /fund-treasury/submit.' })
+  @ApiParam({ name: 'companyId', description: 'Company ID' })
+  @ApiBody({ schema: { properties: { amount: { type: 'number', description: 'Amount in USDC (e.g. 100.50)' } }, required: ['amount'] } })
+  @ApiQuery({ name: 'wallet', required: true, description: 'Employer wallet address for authorization' })
+  @ApiResponse({ status: 200, description: 'Transaction built', schema: { properties: { ok: { type: 'boolean', example: true }, xdr: { type: 'string' }, networkPassphrase: { type: 'string' } } } })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Company not found' })
+  async buildFundTreasury(@Param('companyId') companyId: string, @Body() body: { amount?: number }, @Query('wallet') wallet: string, @Res() response: Response) {
+    try {
+      if (!body.amount || typeof body.amount !== 'number' || body.amount <= 0) {
+        return response.status(400).json({ ok: false, error: 'Invalid amount' });
+      }
+      const company = await this.companiesService.findById(companyId);
+      if (!company) return response.status(404).json({ ok: false, error: 'Company not found' });
+      if (company.employerWallet !== wallet) return response.status(403).json({ ok: false, error: 'Unauthorized' });
+      const amountMicro = Math.round(body.amount * 1_000_000);
+      const result = await this.companiesService.buildFundTreasury(companyId, wallet, amountMicro);
+      return response.json({ ok: true, ...result });
+    } catch (error: any) {
+      return response.status(400).json({ ok: false, error: error.message });
+    }
+  }
+
+  @Post(':companyId/fund-treasury/submit')
+  @UseGuards(WalletAuthGuard)
+  @ApiOperation({ summary: 'Submit signed fund-treasury transaction', description: 'Submits a Freighter-signed fund-treasury transaction to the Soroban network.' })
+  @ApiParam({ name: 'companyId', description: 'Company ID' })
+  @ApiBody({ schema: { properties: { signedXdr: { type: 'string' } }, required: ['signedXdr'] } })
+  @ApiQuery({ name: 'wallet', required: true, description: 'Employer wallet address for authorization' })
+  @ApiResponse({ status: 200, description: 'Transaction submitted' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 404, description: 'Company not found' })
+  async submitFundTreasury(@Param('companyId') companyId: string, @Body() body: { signedXdr?: string }, @Query('wallet') wallet: string, @Res() response: Response) {
+    try {
+      if (!body.signedXdr) return response.status(400).json({ ok: false, error: 'Missing signedXdr' });
+      const company = await this.companiesService.findById(companyId);
+      if (!company) return response.status(404).json({ ok: false, error: 'Company not found' });
+      if (company.employerWallet !== wallet) return response.status(403).json({ ok: false, error: 'Unauthorized' });
+
+      const rpcUrl = process.env.STELLAR_RPC_URL || 'https://soroban-testnet.stellar.org';
+      const res = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: { transaction: body.signedXdr } }),
+      });
+      const data = await res.json();
+      if (data.error) return response.status(400).json({ ok: false, error: `Soroban submit failed: ${JSON.stringify(data.error).slice(0, 500)}` });
+
+      const result = data.result;
+      if (result?.status === 'ERROR') {
+        const errorResult = result.errorResult ? JSON.stringify(result.errorResult).slice(0, 2000) : '';
+        return response.status(400).json({ ok: false, error: `Soroban submit failed: ${result.status} ${errorResult}`.trim() });
+      }
+      return response.json({ ok: true, txHash: result?.hash || '', status: result?.status || 'PENDING' });
+    } catch (error: any) {
+      return response.status(400).json({ ok: false, error: error.message });
+    }
+  }
 }
